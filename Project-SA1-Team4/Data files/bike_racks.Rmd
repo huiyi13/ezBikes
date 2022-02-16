@@ -1,0 +1,46 @@
+---
+title: "bike_racks"
+output: html_document
+---
+
+```{r, message=FALSE, warning=FALSE}
+library(sf)
+library(tidyverse)
+library(ggmap)
+```
+
+```{r, message=FALSE, warning=FALSE}
+racks <- st_read("lta-bicycle-rack-kml.kml")
+kml.text <- readLines("lta-bicycle-rack-kml.kml")
+
+#rack count
+rc <- grep("<SimpleData name=\"RACK_CNT\"> *([^<]+?) *<\\/SimpleData>", kml.text)
+temp1 <- gsub("<SimpleData name=\"RACK_CNT\">"," ", kml.text[rc])  
+rack_count <- gsub("</SimpleData>"," ", temp1)  
+racks[,4] <- as.data.frame(rack_count)
+racks[,"rack_count"] <- as.numeric(str_trim(racks$rack_count))
+
+#long + lat
+coords <- grep("<coordinates>", kml.text)
+temp1 <- gsub("<coordinates>", "", kml.text[coords])
+coords <- gsub("</coordinates>","", temp1)
+racks[,5] <- as.data.frame(coords)
+racks <- separate(racks, col = coords, into = c("longitude","latitude"), sep = ",")
+
+racks <- racks[,-c(2)]
+racks <- st_drop_geometry(racks)
+
+#reverse geocode
+address <- do.call(rbind,
+                  lapply(1:nrow(racks),
+                         function(i)revgeocode(as.numeric(racks[i,3:4]), output = "address")))
+racks <- cbind(racks, address)
+racks$address <- gsub("#.{5}","",racks$address)
+racks$address <- gsub(", ,",",", racks$address)
+racks$address <- str_trim(racks$address, side = c("both"))
+```
+
+```{r}
+write.csv(racks, "bike_racks.csv")   
+```
+

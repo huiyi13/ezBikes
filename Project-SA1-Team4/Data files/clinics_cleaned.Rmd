@@ -1,0 +1,61 @@
+---
+title: "Clinics cleaned"
+author: "SA1 Team 4"
+date: "10/29/2021"
+output: html_document
+---
+
+
+```{r, message=FALSE, warning=FALSE}
+library(sf)
+
+clinics <- st_read("chas-clinics-kml.kml") #table of data
+clinics.clean <- clinics
+
+kml.text <- readLines("chas-clinics-kml.kml") #to see which nodes each info is stored under
+
+#retrieve clinic names:
+names <- grep("<SimpleData name=\"HCI_NAME\">*([^<]+?) *<\\/SimpleData>" ,kml.text)
+clinicnames <- gsub("<SimpleData name=\"HCI_NAME\">", "", kml.text[names])
+clinicnames <- gsub("</SimpleData>", "", clinicnames)
+
+clinics.clean$clinic_names <- clinicnames
+clinics.clean$clinic_names <-  gsub("&amp;","&", clinics.clean$clinic_names)
+
+#retrieve postal codes
+postal <- kml.text[grep("<SimpleData name=\"POSTAL_CD\">", kml.text)]
+clinics.clean$postalcode <- postal %>% gsub("<SimpleData name=\"POSTAL_CD\">", "",.) %>% gsub("</SimpleData>", "",.)
+
+#separate coordinates into longitude and latitude
+coords <- kml.text[grep("<coordinates>", kml.text)]
+clinics.clean$coords <- coords %>% gsub("<coordinates>", "",.) %>% gsub("</coordinates>", "",.)
+library(tidyr)
+clinics.clean <- separate(clinics.clean, col=coords, into=c('longitude','latitude'), sep=',')
+
+clinics.clean <- clinics.clean[,-2]
+clinics.clean <- st_drop_geometry(clinics.clean)
+
+# #retrieve block
+# block <- kml.text[grep("<SimpleData name=\"BLK_HSE_NO\">", kml.text)]
+# clinics.clean$blk <- block %>% gsub("<SimpleData name=\"BLK_HSE_NO\">", "",.) %>% gsub("</SimpleData>", "",.)
+# 
+# #retrieve floor
+# floor <- kml.text[grep("<SimpleData name=\"FLOOR_NO\">", kml.text)]
+# clinics.clean$flr <- floor %>% gsub("<SimpleData name=\"FLOOR_NO\">", "",.) %>% gsub("</SimpleData>", "",.)
+#
+# #retrieve number
+# num <- kml.text[grep("<SimpleData name=\"HCI_TEL\">", kml.text)]
+# clinics.clean$number <- num %>% gsub("<SimpleData name=\"HCI_TEL\">", "",.) %>% gsub("</SimpleData>", "",.)
+
+#different number of blocks, floors and number
+
+#retrieve street
+street <- kml.text[grep("<SimpleData name=\"STREET_NAME\">", kml.text)]
+clinics.clean$address <- street %>% gsub("<SimpleData name=\"STREET_NAME\">", "",.) %>% gsub("</SimpleData>", "",.)
+clinics.clean$address <- paste(clinics.clean$address, clinics.clean$postalcode, sep = ", ")
+```
+
+
+```{r}
+write.csv(clinics.clean, "clinics.csv")   
+```

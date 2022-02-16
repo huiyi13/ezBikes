@@ -1,0 +1,120 @@
+---
+title: "Toilets cleaned"
+author: "SA1 Team 4"
+output: html_document
+---
+
+```{r warnings=False, message=false}
+library(jsonlite)
+library(XML)
+library(dplyr)
+library(tidyr)
+library(curl)
+library(jsonlite)
+library(rvest)
+library(tidyverse)
+library(stringr)
+library(knitr)
+library(RDSTK)
+library(ggmap)
+library(tidygeocoder)
+library(BBmisc)
+```
+
+```{r}
+url <- "https://www.toilet.org.sg/loomapdirectory"
+url <- curl(url)
+urldata <- readLines(url)
+data <- readHTMLTable(urldata)
+```
+
+```{r}
+names <- c("Type", "Name", "Address", "Region")
+region <- c("Central", "North East", "North West", "South East", "South West")
+toilets <- data.frame()
+
+for (i in 1:4) {
+  frame <- as.data.frame(data[i])
+  frame <- frame[, -4]  #Drop Awards column
+  frame$Region <- region[i]
+  colnames(frame) <- names
+  toilets <- rbind(toilets, frame)
+}
+```
+
+```{r}
+addresses <- toilets$Address
+addresses <- gsub(",", "", addresses)
+addresses <- gsub(".*[S(]([^)]+)[)].*", "\\1", addresses)
+
+toilets$postcode <- addresses
+```
+
+```{r}
+toilets_latlong <- toilets %>% geocode(postcode)
+```
+
+```{r}
+#Clean df
+toilets_clean <- toilets_latlong[!is.na(toilets_latlong$lat),]
+toilets_notclean <- toilets_latlong[is.na(toilets_latlong$lat),]
+postcodes <- toilets_notclean$postcode
+postcodes[match("Sentosa Siliso East", postcodes)] <- "098267"
+```
+
+```{r}
+coords <- data.frame()
+for (postcode in postcodes) {
+  url <- curl(paste0("https://zip.nowmsg.com/sg_postal_code.asp?CityName=", postcode))
+  urldata <- readLines(url)
+  data <- readHTMLTable(urldata)
+  if (length(data) == 0) {
+    lat <- NA
+    lng <- NA
+  }
+  else {
+    lat <- data[[1]]$latitude
+    lng <- data[[1]]$longitude
+  }
+  item <- data.frame(postcode=postcode, lat=lat, lng=lng)
+  coords <- rbind(coords, item)
+}
+```
+
+```{r}
+toilets1 <- left_join(toilets_notclean, coords, by="postcode") %>% select(-c(lat.x, long))
+colnames(toilets1) <- colnames(toilets_clean)
+
+toilets1_clean <- toilets1[!is.na(toilets1$lat),]
+toilets_na <- toilets1[is.na(toilets1$lat),]
+
+toilets_na_latlong <- toilets_na %>% geocode(Name)
+toilets_na_latlong_clean <- toilets_na_latlong[!is.na(toilets_na_latlong$lat...8),]
+toilets_na_latlong_na <- toilets_na_latlong[is.na(toilets_na_latlong$lat...8),]
+
+addresses <- toilets_na_latlong_na$Address
+index_s <- unlist(gregexpr("S\\(", addresses))
+addresses <- str_sub(addresses, start =1, end=index_s-2) %>% trimws()
+addresses <- gsub(",", "", addresses)
+addresses <- gsub("Level [0-9]", "", addresses) %>% trimws()
+
+toilets_na_latlong_na$Test <- addresses
+toilets6 <- toilets_na_latlong_na %>% geocode(Test)
+
+toilets_na_latlong_clean <- toilets_na_latlong_clean %>% select(-c(lat...6, long...7))
+colnames(toilets_na_latlong_clean) <- colnames(toilets_clean)
+
+toilets6 <- toilets6 %>% select(-c(lat...6, long...7, lat...8, long...9, Test))
+colnames(toilets6) <- colnames(toilets_clean)
+```
+
+```{r}
+toilets_clean <- rbind(toilets_clean, toilets1_clean)
+toilets_clean <- rbind(toilets_clean, toilets_na_latlong_clean)
+toilets_clean <- rbind(toilets_clean, toilets6)
+```
+
+```{r}
+write.csv(toilets_clean, "toilets.csv")
+```
+

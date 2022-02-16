@@ -1,0 +1,227 @@
+---
+title: "PCN Access Points cleaned"
+author: "SA1 Team 4"
+date: "10/29/2021"
+output: html_document
+---
+
+```{r}
+library(sf)
+
+pcn <- st_read("PCN_Access_Points.kml") #table of data
+pcn.clean <- pcn
+
+kml.text <- readLines("PCN_Access_Points.kml") #to see which nodes each info is stored under
+
+#retrieve description of each location
+library(stringr)
+pcn.clean$location <- str_extract_all(pcn.clean$Description, "\\([^()]+\\)")
+
+for (i in 1:nrow(pcn.clean))
+{
+  pcn.clean$location[i] <- substr(pcn.clean$location[i], 2, nchar(pcn.clean$location[i])-1 )
+}                             
+
+                                                          
+#separate coordinates into longitude and latitude
+coords <- kml.text[grep("<coordinates>", kml.text)]
+pcn.clean$coords <- coords %>% gsub("<coordinates>", "",.) %>% gsub("</coordinates>", "",.)
+library(tidyr)
+pcn.clean <- separate(pcn.clean, col=coords, into=c('longitude','latitude'), sep=',')
+
+pcn.clean <- pcn.clean[,-2]
+pcn.clean <- st_drop_geometry(pcn.clean)
+pcn.clean$location <- gsub(",", "", pcn.clean$location)
+```
+
+```{r}
+pcn.clean <- as.matrix(pcn.clean)
+write.csv(pcn.clean, "pcn_access_points.csv")   
+```
+
+```{r, warnings=FALSE messages=FALSE}
+library(jsonlite)
+library(XML)
+library(dplyr)
+library(tidyr)
+library(curl)
+library(jsonlite)
+library(rvest)
+```
+
+```{r}
+pcn <- read.csv("pcn_access_points.csv")
+pcn_names <- unique(pcn$Name)
+```
+
+```{r}
+pcn1 <- tolower(pcn_names) 
+pcn2 <- gsub("park connector", "pc", pcn1)
+pcn3 <- gsub(" ", "-", pcn2)
+pcn3 <- gsub("avenue", "ave", pcn3)
+```
+
+```{r}
+urls <- paste0("https://www.nparks.gov.sg/gardens-parks-and-nature/park-connector-network/", pcn3)
+pcns <- data.frame(pcn_names, urls)
+```
+
+```{r}
+final_pcn = data.frame()
+
+read_page <- function(url) {
+  page <- try(read_html(url))
+  return(page)
+}
+
+for (i in c(1:nrow(pcns))) {
+  row <- pcns[i,]
+  
+  page <- read_page(row$urls)
+  if (class(page)==c("xml_document", "xml_node")) {
+    description <- html_nodes(page, ".description p") %>% html_text() %>% paste(collapse="")
+    location <- html_nodes(page, ".aside-info-block:nth-child(1)") %>% html_text()
+    info <- html_nodes(page, ".basic-info") %>% html_text()
+
+    if (length(description) > 0 & length(location) > 0 & length(info) > 0) {
+      to_final_pcn <- data.frame(name=row$pcn_names, description=description, location=location, info=info, misc=NA)
+      final_pcn <- rbind(final_pcn, to_final_pcn)
+    }
+  } else{
+    next
+  }
+}
+```
+
+```{r}
+final_pcn1 <- final_pcn
+clean_locations <- gsub("\r\n    \r\n        Location\r\n    \r\n    ", "", final_pcn1$location) 
+clean_locations <- gsub("Get Directions", "", clean_locations)
+clean_locations <- gsub("\\\r", "", clean_locations)
+clean_locations <- gsub("\\\t", "", clean_locations)
+clean_locations <- gsub("\\\n", "", clean_locations)
+clean_locations <- clean_locations %>% trimws()
+final_pcn1$location <- clean_locations
+
+final_pcn2 <- final_pcn1
+final_pcn2$info <- gsub("\\\t", "", final_pcn2$info)
+final_pcn2 <- separate(final_pcn2, col=info, into=c("t1", "t2", "t3", "t4", "t5", "t6"), sep="\\\n")
+final_pcn3 <- final_pcn2 %>% select(-c(t1, t2, misc))
+```
+
+```{r}
+colnames(final_pcn3) <- c("Name", "Description", "Location", "Length of PC", "Opening Hours", "Lighting Hours", "Accessibility")
+
+clean_lengthofpc <- gsub("Length of PC: ", "", final_pcn3$`Length of PC`)
+clean_lengthofpc <- gsub("\\\r", "", clean_lengthofpc)
+clean_lengthofpc <- trimws(clean_lengthofpc)
+final_pcn3$`Length of PC` <- clean_lengthofpc
+
+clean_open <- gsub("Opening Hours: ", "", final_pcn3$`Opening Hours`)
+clean_open <- gsub("\\\r", "", clean_open)
+clean_open <- trimws(clean_open)
+clean_open <- gsub("24hours", "24 hours", clean_open)
+final_pcn3$`Opening Hours` <- clean_open
+
+clean_light <- gsub("Lighting Hours: ", "", final_pcn3$`Lighting Hours`)
+clean_light <- gsub("\\\r", "", clean_light)
+clean_light <- trimws(clean_light)
+final_pcn3$`Lighting Hours` <- clean_light
+
+clean_access <- gsub("Accessibility: ", "", final_pcn3$Accessibility)
+clean_access <- gsub("\\\r", "", clean_access)
+clean_access <- trimws(clean_access)
+final_pcn3$Accessibility <- clean_access
+```
+
+```{r}
+missing <- pcn_names[!(pcn_names %in% final_pcn3$Name)]
+missing
+```
+
+```{r}
+to_add <- data.frame()
+
+m1 <- c(Name="Pandan Gardens Park Connector", 
+        Description="Extending from West Coast Road to Ulu Pandan Park Connector Bridge, Pandan Gardens Park Connector runs through residential areas and links to the Pandan Reservoir and Pandan Reservoir Fitness Corner. It is a great place for joggers who want to enjoy a short and comfortable run or even amateur skaters looking for relatively flat terrains. Pandan Garden Park Connector also joins the Ulu Pandan Park Connector via Singapore’s first elevated Park Connector bridge (Ulu Pandan Park Connector Bridge).", 
+        Location="Pandan Gardens Park Connector starts at West Coast Road and ends at Ulu Pandan Park Connector Bridge.", 
+        `Length of PC`="0.4km", 
+        `Opening Hours`="24 hours daily", 
+        `Lighting Hours`="7.00pm-7.00am",
+        Accessibility=NA)
+
+m2 <- c(Name="Choa Chu Kang North Park Connector", 
+        Description="The 5.4 km Choa Chu Kang Park Connector links Choa Chu Kang Park to Bukit Batok Town Park near Bukit Gombak MRT station via the heartlands of Choa Chu Kang neighbourhood. Designed for cycling, jogging and other outdoor activities such as strolling, dog-walking and skating, it is a popular route for recreational activities for nearby residents to. Nature lovers can look forward to the 1 km scenic stretch along Brickland Road, which is decorated with lush greenery and bright and colourful flowering plants that bloom all year round. After a fulfilling workout, visitors can stop by Choa Chu Kang Central to enjoy the variety of eateries, cafes, restrooms and shopping areas available. Alternatively, fitness enthusiasts can use the sports facilities available at the Bukit Gombak stadium and sports hall, situated next to the Choa Chu Kang park connector near Bukit Gombak MRT station.", 
+        Location="Choa Chu Kang Park Connector starts at Choa Chu Kang Drive.  It runs along Choa Chu Kang Ave 4, Ave 1, Ave 3, Brickland Rd and ends at Bukit Batok West Ave 5.",
+        `Length of PC`="5.4km", 
+        `Opening Hours`="24 hours daily", 
+        `Lighting Hours`="7.00pm-7.00am",
+        Accessibility=NA)
+
+m3 <- c(Name="Springleaf Park Connector", 
+        Description="Springleaf Park Connector runs from Upper Thomson Road to Lentor Avenue. Approximately 1.2km, it provides joggers a nice path for leisure jog or walk in this nature environment.", 
+        Location="Springleaf Park Connector starts at Lentor Ave and ends at Upper Thomson Road.",
+        `Length of PC`="1.2km", 
+        `Opening Hours`=NA, 
+        `Lighting Hours`=NA,
+        Accessibility=NA)
+
+m4 <- c(Name="Punggol Promenade Riverside Walk", 
+        Description="The lookout points along Punggol Promenade Riverside Walk allow visitors to get closer to the adjacent Serangoon Reservoir. Linking Punggol Point to Punggol East, Punggol Promenade is a waterfront recreational destination for residents in this region and provides access to the rustic northeastern coastline. Consisting of three thematic zones – Riverside Walk, Nature Walk and Punggol Point Walk – every segment of the Punggol Promenade is unique and offers a variety of recreational experiences. There is even a cluster of food and beverage outlets at Tebing Lane, located adjacent to the riverside walk.", 
+        Location=NA,
+        `Length of PC`=NA, 
+        `Opening Hours`=NA, 
+        `Lighting Hours`=NA,
+        Accessibility=NA)
+
+m5 <- c(Name="Punggol Promenade Punggol Point Walk", 
+        Description="Begin your seaside stroll at Punggol Point Park. Once a popular seafood haunt, the site adjacent to Punggol Jetty has now been transformed into an idyllic waterfront destination. While much of the Punggol coastline used to be inaccessible to the public, today’s Punggol Promenade Punggol Point Walk allows you to enjoy the greenery and biodiversity flourishing along the sea. With lookout decks, a sand-filled playground and an event plaza, the park allows you to soak in the laidback coastal atmosphere and take in views of Pulau Ubin and the Johor Straits on a ship-inspired, elevated viewing deck. You can also dine at the various food and beverage outlets near Punggol Point Park.", 
+        Location=NA,
+        `Length of PC`=NA, 
+        `Opening Hours`=NA, 
+        `Lighting Hours`=NA,
+        Accessibility=NA)
+
+to_add <- rbind(to_add, m1, m2, m3, m4, m5)
+colnames(to_add) <- colnames(final_pcn3)
+final_pcn4 <- rbind(final_pcn3, to_add)
+```
+
+```{r}
+clean_access2 <- final_pcn4$Accessibility
+clean_access2[is.na(clean_access2)] <- ""
+clean_access2 <- gsub(":", "", clean_access2)
+clean_access2 <- trimws(clean_access2)
+final_pcn4$Accessibility <- clean_access2
+
+write.csv(final_pcn4, "pcn_crawl.csv")
+```
+
+```{r}
+d1 <- read.csv("pcn_access_points.csv")
+d2 <- read.csv("pcn_crawl.csv")
+
+d3 <- left_join(d1, d2, by="Name")
+d3 <- d3 %>% select(Name, location, longitude, latitude, Description, Location, Length.of.PC, Opening.Hours, Lighting.Hours, Accessibility)
+```
+
+```{r}
+colnames(d3) <- c("Name", "Location", "longitude", "latitude", "Description", "More Info", "Length.of.PC", "Opening.Hours", "Lighting.Hours", "Accessibility")
+
+d3[is.na(d3$Description)|d3$Description=="","Description"] <- NA
+d3[is.na(d3$`More Info`)|d3$`More Info`=="","More Info"] <- NA
+d3[is.na(d3$Length.of.PC)|d3$Length.of.PC=="","Length.of.PC"] <- NA
+d3[is.na(d3$Opening.Hours)|d3$Opening.Hours=="","Opening.Hours"] <- NA
+d3[is.na(d3$Lighting.Hours)|d3$Lighting.Hours=="","Lighting.Hours"] <- NA
+d3[is.na(d3$Accessibility)|d3$Accessibility=="","Accessibility"] <- NA
+
+for (i in 1:length(d3$Lighting.Hours))
+{
+  d3$Lighting.Hours[i] <- gsub("–","to" , d3$Lighting.Hours[i])
+}
+
+d3 <- as.matrix(d3)
+write.csv(d3, "pcn_access_points.csv")
+```
+
+

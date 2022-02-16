@@ -1,0 +1,53 @@
+---
+title: "Supermarkets cleaned"
+author: "SA1 Team 4"
+output: html_document
+---
+
+```{r}
+library(ggmap)
+library(dplyr)
+library(RDSTK)
+library(stringr)
+library(tidygeocoder)
+data <- read.csv("listing-of-supermarkets.csv")
+```
+
+```{r}
+postcodes <- data$premise_address
+postcodes <- str_extract(postcodes, "S\\([0-9]+\\)")
+postcodes <- str_sub(postcodes, start=3, end=8)
+data$postcodes <- postcodes
+```
+
+```{r}
+results <- data %>% geocode(postcodes)
+
+clean_results <- results[!is.na(results$lat),]
+dirty_results <- results[is.na(results$lat),]
+
+adds <- dirty_results$premise_address
+
+i_hash <- str_locate(adds, ",")[, "start"]
+adds <- str_sub(adds, start=1, i_hash-1)
+dirty_results$new_adds <- adds
+```
+
+```{r}
+dirty_results_1 <- dirty_results %>% geocode(new_adds)
+```
+
+```{r}
+clean_results_2 <- dirty_results_1[!is.na(dirty_results_1$lat...9), ] %>% select(-c(lat...6, long...7, new_adds))
+names(clean_results_2) <- names(clean_results)
+
+clean_results <- rbind(clean_results, clean_results_2)
+```
+
+```{r}
+write.csv(clean_results, "supermarkets.csv")
+```
+
+
+
+
